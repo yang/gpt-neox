@@ -387,6 +387,7 @@ def forward_step(
 
     if neox_args.memory_profiling:
         torch.cuda.nvtx.range_push(f"Forward pass")
+
     # Sequential returns moe_losses, but this is not yet supported by pipe parallel
     maybe_tuple = model((tokens, position_ids, attention_mask), neox_args=neox_args)
     if type(maybe_tuple) is tuple:

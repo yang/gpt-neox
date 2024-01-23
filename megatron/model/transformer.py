@@ -1139,6 +1139,12 @@ class ParallelTransformerLayer(nn.Module):
                 mlp_output, moe_loss, _ = self.mlp(layernorm_output)
                 mlp_bias = None  # deepspeed.moe.layer.MoE.forward ignores the bias term
 
+            if self.num_experts == 1:
+                mlp_output, mlp_bias = self.mlp(layernorm_output)
+            else:
+                mlp_output, moe_loss, _ = self.mlp(layernorm_output)
+                mlp_bias = None  # deepspeed.moe.layer.MoE.forward ignores the bias term
+
             with torch.enable_grad():
                 if self.mlp_type == "llama" or self.num_experts > 1:
                     # No dropout either
