@@ -1214,3 +1214,13 @@ class NeoXArgsTextgen(NeoXArgsTemplate):
     """
     Number of parallel experts in MoE
     """
+
+    moe_type: str = "deepspeed"
+    """
+    Either `deepspeed` or `megablocks`
+    """
+
+    moe_glu: bool = False
+    """
+    Use gated linear units in MoE
+    """
