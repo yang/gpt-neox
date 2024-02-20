@@ -42,6 +42,7 @@ from .neox_args import (
     NeoXArgsTokenizer,
     NeoXArgsTraining,
     NeoXArgsParallelism,
+    NeoXArgsMoE,
     NeoXArgsLogging,
     NeoXArgsOther,
     NeoXArgsTextgen,

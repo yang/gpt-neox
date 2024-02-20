@@ -90,6 +90,58 @@ class NeoXArgsParallelism(NeoXArgsTemplate):
 
 
 @dataclass
+class NeoXArgsMoE(NeoXArgsTemplate):
+    """
+    Mixture of Expert (MoE) Arguments
+    """
+
+    moe_num_experts: int = None
+    """
+    The number of experts in MoE layers. MoE
+    layers not used if set to None
+    """
+
+    moe_capacity_factor: int = 0
+    """
+    Capacity factor for MoE layers. If zero, use
+    dropless MoE implementation.
+    """
+
+    moe_top_k: int = 1
+    """
+    'The number of experts each token is routed to
+    in MoE layers.
+    """
+
+    moe_loss_weight: float = 0.1
+    """
+    The weight for the MoE auxiliary load balancing loss.
+    """
+
+    moe_lbl_in_fp32: bool = False
+    """
+    Whether to compute the load balancing loss in fp32.
+    """
+
+    moe_jitter_eps: float = None
+    """
+    Coefficient for MoE routing jitter. Jitter is 
+    not used if set to None
+    """
+
+    moe_use_megatron_switch: bool = False
+    """
+    Whether to use Megatron SwitchMLP for MoE layers.
+    """
+
+    moe_expert_model_parallelism: bool = False
+    """
+    Enable expert model paralleism within
+    the data parallel group.
+    """
+
+
+@dataclass
 class NeoXArgsModel(NeoXArgsTemplate):
     """
     Model Arguments
@@ -180,9 +232,9 @@ class NeoXArgsModel(NeoXArgsTemplate):
     Scalenorm epsilon
     """
 
-    pos_emb: Literal[
-        "learned", "rotary", "sinusoidal", "rpe", "alibi", "none"
-    ] = "learned"
+    pos_emb: Literal["learned", "rotary", "sinusoidal", "rpe", "alibi", "none"] = (
+        "learned"
+    )
     """
     Type of positional embedding to use - choose from 'learned', 'rotary', 'sinusoidal', 'rpe', 'none'
     """
