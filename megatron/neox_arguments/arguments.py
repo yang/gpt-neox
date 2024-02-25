@@ -90,6 +90,7 @@ BASE_CLASSES = [
     NeoXArgsDeepspeedRunner,
     NeoXArgsDeepspeedConfig,
     NeoXArgsModel,
+    NeoXArgsMoE,
     NeoXArgsLRScheduler,
     NeoXArgsOptimizer,
     NeoXArgsTokenizer,
@@ -181,7 +182,6 @@ class NeoXArgs(*BASE_CLASSES):
         config_files = dict()
         # iterate of all to be loaded yaml files
         for conf_file_name in paths_to_yml_files:
-
             # load file
             with open(conf_file_name) as conf_file:
                 conf = yaml.load(conf_file, Loader=yaml.FullLoader)
@@ -478,7 +478,6 @@ class NeoXArgs(*BASE_CLASSES):
         return extra_ds_args
 
     def get_deepspeed_main_args(self):
-
         args_list = list()
 
         if self.autotuning_run is not None:
@@ -804,7 +803,6 @@ class NeoXArgs(*BASE_CLASSES):
 
     @staticmethod
     def check_batch_parameters(dp_world_size, train_batch, micro_batch, grad_acc):
-
         assert (
             train_batch > 0
         ), f"Train batch size: {train_batch} has to be greater than 0"
@@ -1213,7 +1211,6 @@ class NeoXArgs(*BASE_CLASSES):
 
         # Parameters sharing does not work with torch DDP.
         if (self.num_unique_layers is not None) and (self.num_layers is not None):
-
             if not (self.num_unique_layers <= self.num_layers):
                 error_message = (
                     self.__class__.__name__
