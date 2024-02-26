@@ -1,0 +1,28 @@
+version: '3'
+services:
+  gpt-neox:
+    container_name: gpt-neox-cuda117
+    command: nvidia-smi -q --loop=10
+    image: gpt-neox:cuda117
+    shm_size: 1g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    environment:
+      PYTHONPATH: /home/mchorse/gpt-neox
+    logging:
+      options:
+        max-size: "100m"
+        max-file: "3"
+    volumes:
+      # - ${NEOX_DATA_PATH}:/home/mchorse/data
+      # - ${NEOX_CHECKPOINT_PATH}:/home/mchorse/chk
+      - .:/home/mchorse/gpt-neox
