@@ -18,9 +18,9 @@
 	// ${localWorkspaceFolderBasename}
 	"workspaceFolder": "/home/mchorse/gpt-neox",
 	"features": {
-		// "ghcr.io/devcontainers/features/python:1": {
-		// 	"installJupyterlab": true
-		// }
+		"ghcr.io/devcontainers/features/python:1": {
+			"installJupyterlab": true
+		}
 	},
 
 	// Features to add to the dev container. More info: https://containers.dev/features.

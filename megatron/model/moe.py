@@ -11,6 +11,8 @@ import torch.nn.init as init
 
 from megatron.neox_arguments.arguments import NeoXArgs
 from megatron import mpu
+from megatron.mpu import copy_to_model_parallel_region
+from megatron.mpu import gather_from_model_parallel_region
 
 import torch
 
@@ -197,7 +199,7 @@ class ParallelDroplessMLP(torch.nn.Module):
 
     def permute_and_compute(
         self,
-        x,
+        input_,
         tokens_per_expert,
         indices,
         bin_ids,
@@ -207,22 +209,59 @@ class ParallelDroplessMLP(torch.nn.Module):
     ):
         """
         grouped_permute_and_compute
+
+        torch.distributed.all_reduce(tensor, op=<RedOpType.SUM: 0>, group=None, async_op=False)
+        
+        NOTE: Megablocks sets up all MLP tensors as column parallel and uses transposes on some of the grouped_gemm calls for the ops that would be row parallel. This seems to be fine and since we aren't using the underlying NeoX ColumnParallelLinear and RowParallelLinear classes, there doesn't seem to be a reason to change it...because that'd introduce a lot of additional complexity.
+
+        column parallel linear forward
+
+        ```python
+        def forward(self, input_):
+            if self.use_mup and self.mup_rescale_parameters:
+                input_ /= self.width_mult()
+            # Set up backprop all-reduce.
+            input_parallel = copy_to_model_parallel_region(input_)
+            # Matrix multiply.
+
+            bias = self.bias if not self.skip_bias_add else None
+            output_parallel = F.linear(input_parallel, self.weight, bias)
+            if self.gather_output:
+                # All-gather across the partitions.
+                output = gather_from_model_parallel_region(output_parallel)
+            else:
+                output = output_parallel
+            output_bias = self.bias if self.skip_bias_add else None
+            return output, output_bias
+        ```
         """
         # Route the tokens for MoE computation.
-        x = x.view(-1, x.shape[-1])
-        x = ops.gather(x, indices, bin_ids, bins, top_k)
+        ## stack (sl, bs, hs) into (sl * bs, hs)
+        input_ = input_.view(-1, input_.shape[-1])
+
+        ## repeat each token top_k times and shuffle tokens to group them by their respective experts
+        input_ = ops.gather(input_, indices, bin_ids, bins, top_k)
+
+        # QUESTION: is this sufficient for backprop/how does input_parallel actually get used?
+        # Set up backprop all-reduce.
+        input_parallel = copy_to_model_parallel_region(input_)
 
         # TODO: mask x here to this rank's experts only
 
-        # Perform the expert computation, replacing this rank's experts results
-        x = self.mlp(x, tokens_per_expert)
+        # Perform the expert computation for this rank's experts
+        # TODO: still need to actually make the GroupedMLP model parallel aware
+        output_parallel = self.mlp(input_, tokens_per_expert)
+        
+        # all gather masked results from across Tensor parallel ranks here and cat them together
+        # this will replicate the calculation of each expert across all ranks
+        # NOTE: this combined all_gather and torch.cat operation is performed by gather_from_model_parallel_region(output_parallel)
+        # Unlike ColumnParallelLinear, it is nonsensical in the MoE world
+        # to optionally return the output_parallel result...we still have to scatter the tokens back to their original positions
+        output = gather_from_model_parallel_region(output_parallel)
 
-        # TODO: all gather masked results from across Tensor parallel ranks here
-
-        # Un-route the data for the MoE output, so each rank has now has a complete, un-masked input
-        # tensor and can continue independently
+        # Un-route the data for the MoE output
         return ops.scatter(
-            x,
+            output,
             indices,
             bin_ids,
             expert_weights,
@@ -261,13 +300,21 @@ class ParallelDroplessMLP(torch.nn.Module):
         return out, tokens_per_expert
 
     def forward(self, x, scores, expert_weights, expert_indices):
+        # save shape so we can re-shape the outputs later
         in_shape = x.size()
 
         # Compute the experts.
         x, tokens_per_expert = self.forward_once(x, expert_weights, expert_indices)
+        
+        # save load balancing loss
+        # TODO: this is based on megatron-only...how does this work in the megatron-deepspeed world?
         if self.training:
             save_load_balancing_loss((tokens_per_expert, scores))
+        
+        # restore input shape
         x = x.view(in_shape)
+
+        # apply bias
         if self.bias is not None:
             if self.args.return_bias:
                 return x, self.bias
