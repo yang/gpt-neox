@@ -76,7 +76,7 @@ class ParallelGroupedMLP(torch.nn.Module):
             )
         )
         _initialize_affine_weight_gpu(
-            self.w2, init_method, partition_dim=0, stride=stride
+            self.w1, init_method, partition_dim=0, stride=stride
         )
 
         # output
@@ -167,7 +167,7 @@ class ParallelGroupedLLaMAMLP(torch.nn.Module):
             )
         )
         _initialize_affine_weight_gpu(
-            self.w2, init_method, partition_dim=0, stride=stride
+            self.w1, init_method, partition_dim=0, stride=stride
         )
 
         # gate

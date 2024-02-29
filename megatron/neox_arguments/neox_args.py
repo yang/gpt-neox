@@ -101,12 +101,6 @@ class NeoXArgsMoE(NeoXArgsTemplate):
     layers not used if set to 1
     """
 
-    moe_capacity_factor: int = 0
-    """
-    Capacity factor for MoE layers. If zero, use
-    dropless MoE implementation.
-    """
-
     moe_top_k: int = 1
     """
     'The number of experts each token is routed to
@@ -127,17 +121,6 @@ class NeoXArgsMoE(NeoXArgsTemplate):
     """
     Coefficient for MoE routing jitter. Jitter is 
     not used if set to None
-    """
-
-    moe_use_megatron_switch: bool = False
-    """
-    Whether to use Megatron SwitchMLP for MoE layers.
-    """
-
-    moe_expert_model_parallelism: bool = False
-    """
-    Enable expert model paralleism within
-    the data parallel group.
     """
 
 

@@ -10,10 +10,14 @@ from megatron.neox_arguments.arguments import NeoXArgs
 
 
 class LearnedRouter(torch.nn.Module):
-    # TODO: how do we ensure that all data parallel copies get the same
-    # initializations? Or is this handled by RNG seeding?
+    # TODO: how do we ensure that all copies of the router get the same
+    # initializations and stay in sync over time? Or is this handled by RNG seeding?
 
-    def __init__(self, neox_args: NeoXArgs):
+    def __init__(
+            self,
+            neox_args: NeoXArgs,
+            init_method,
+        ):
         super().__init__()
         self.jitter_eps = neox_args.moe_jitter_eps
         self.top_k = neox_args.moe_top_k
@@ -30,7 +34,7 @@ class LearnedRouter(torch.nn.Module):
             dtype=neox_args.params_dtype,
             device=torch.cuda.current_device(),
         )
-        neox_args.init_method(self.layer.weight)
+        init_method(self.layer.weight)
 
     def jitter(self, x):
         """

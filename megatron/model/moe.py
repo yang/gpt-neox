@@ -270,7 +270,7 @@ class ParallelDroplessMLP(torch.nn.Module):
 
         # Perform the expert computation for this rank's experts
         output_parallel = self.mlp(input_parallel, local_tokens_per_expert)
-        
+
         # all gather masked results from across Tensor parallel ranks here and cat them together
         # this will replicate the calculation of each expert across all ranks
         # NOTE: this combined all_gather and torch.cat operation is performed by gather_from_model_parallel_region(output_parallel)
@@ -287,6 +287,7 @@ class ParallelDroplessMLP(torch.nn.Module):
             bins,
             top_k,
         )
+        
 
     def forward_once(self, x: torch.Tensor, expert_weights: torch.Tensor, expert_indices: torch.Tensor):
         """
@@ -313,7 +314,7 @@ class ParallelDroplessMLP(torch.nn.Module):
             bin_ids,
             expert_weights,
             bins,
-            self.args.moe_top_k,
+            self.top_k,
         )
         return out, tokens_per_expert
 
@@ -331,6 +332,7 @@ class ParallelDroplessMLP(torch.nn.Module):
         
         # restore input shape
         x = x.view(in_shape)
+        return x
 
 
 def cast_if_autocast_enabled(tensor: torch.Tensor):
@@ -345,6 +347,9 @@ def cast_if_autocast_enabled(tensor: torch.Tensor):
     return tensor
 
 class ParallelDroplessMoE(torch.nn.Module):
+    """
+    TODO: add check to ensure world_size >= num experts...otherwise you end up cutting experts across ranks. which is bad
+    """
     def __init__(
             self,
             neox_args: NeoXArgs,
@@ -353,7 +358,10 @@ class ParallelDroplessMoE(torch.nn.Module):
         ):
         super(ParallelDroplessMoE, self).__init__()
 
-        self.router = LearnedRouter(neox_args)
+        self.router = LearnedRouter(
+            neox_args,
+            init_method
+        )
 
         self.experts = ParallelDroplessMLP(
             neox_args,
@@ -362,6 +370,9 @@ class ParallelDroplessMoE(torch.nn.Module):
         )
 
     def forward(self, x):
+        # we expect inputs as (sl, bs, hs)
+        # neox also provides inputs as (sl, bs, hs)
+
         # NOTE: If we're going to cast the activations to lower precision
         # do it before we permute the tokens to save bandwidth
         x = cast_if_autocast_enabled(x)
@@ -369,5 +380,5 @@ class ParallelDroplessMoE(torch.nn.Module):
         # Compute the expert scores and assignments
         scores, expert_weights, expert_indices = self.router(x)
 
-        # return value should be 
-        return self.experts(x, scores, expert_weights, expert_indices)
+        # return value should be
+        return self.experts(x, scores, expert_weights, expert_indices), None
