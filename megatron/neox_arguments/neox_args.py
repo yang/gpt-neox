@@ -95,10 +95,10 @@ class NeoXArgsMoE(NeoXArgsTemplate):
     Mixture of Expert (MoE) Arguments
     """
 
-    moe_num_experts: int = None
+    moe_num_experts: int = 1
     """
     The number of experts in MoE layers. MoE
-    layers not used if set to None
+    layers not used if set to 1
     """
 
     moe_capacity_factor: int = 0
