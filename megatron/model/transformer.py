@@ -22,6 +22,8 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
+from megatron.model.moe import ParallelDroplessMoE
+
 from .norms import get_norm
 from megatron import mpu
 from megatron.model import megablocks_utils
@@ -1026,7 +1028,7 @@ class ParallelTransformerLayer(nn.Module):
                     init_method=init_method,
                     output_layer_init_method=output_layer_init_method,
                     parallel_output=self.gpt_j_residual,
-                    **kw
+                    **kw,
                 )
             elif mlp_type == "llama":
                 return LLaMAParallelMLP(
@@ -1034,7 +1036,7 @@ class ParallelTransformerLayer(nn.Module):
                     init_method=init_method,
                     output_layer_init_method=output_layer_init_method,
                     parallel_output=self.gpt_j_residual,
-                    **kw
+                    **kw,
                 )
             else:
                 raise KeyError(mlp_type)
@@ -1092,7 +1094,7 @@ class ParallelTransformerLayer(nn.Module):
                     # including TED parallelism.
                     #
                     # Effectively, we want to:
-                    # 
+                    #
                     # - Make DS's data parallel gradient all-reduction skip these params.
                     # - But make these params participate in the expert parallel all-reduction!
                     #
@@ -1124,7 +1126,7 @@ class ParallelTransformerLayer(nn.Module):
 
                     # Next, we trick DS into seeing these as its own MoE params.
                     for param in self.mlp.parameters():
-                        if getattr(param,'expert_model_parallel',None) is not None:
+                        if getattr(param, "expert_model_parallel", None) is not None:
                             # is_moe_param looks for this attr.
                             param.allreduce = False
                             param.group_name = throwaway.expert_group_name
