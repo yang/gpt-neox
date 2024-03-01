@@ -272,12 +272,7 @@ class _MegablocksAdapter(nn.Module):
     def __init__(self, neox_args, layer_cls, init_method, output_layer_init_method):
         super().__init__()
         megablocks_utils.assert_megablocks_is_available()
-        import copy
-
-        tmp = copy.copy(neox_args)
-        delattr(tmp, "mlp_type")
-        tmp.mlp_type = "mlp"
-        args = megablocks_utils.arguments.from_megatron(tmp)
+        args = megablocks_utils.as_megablocks_args(neox_args)
         args.device = torch.cuda.current_device()
         args.init_method = init_method
         args.output_layer_init_method = output_layer_init_method
@@ -291,6 +286,8 @@ class _MegablocksAdapter(nn.Module):
 
         if neox_args.moe_glu:
             args.mlp_type = "glu"
+
+        args.moe_loss_weight = neox_args.moe_loss_coeff
         self.moe = layer_cls(args)
 
     def forward(self, x):

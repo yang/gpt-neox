@@ -360,6 +360,61 @@ def get_batch_sequential(forward_input, neox_args):
     )
     return (forward_input[0], forward_input[1], attention_mask)
 
+def average_losses_across_data_parallel_group(losses):
+    """Reduce a tensor of losses across all GPUs."""
+    averaged_losses = torch.cat(
+        [loss.clone().detach().view(1) for loss in losses])
+    torch.distributed.all_reduce(averaged_losses,
+                                 group=mpu.get_data_parallel_group())
+    averaged_losses = averaged_losses / \
+        torch.distributed.get_world_size(group=mpu.get_data_parallel_group())
+
+    return averaged_losses
+
+
+def moe_loss_func(args, loss_mask, output_tensor=None):
+    from megatron.model import megablocks_utils
+    from megatron.model.megablocks_utils import moe
+
+    # NOTE: For pipeline parallelism this function will be run on the
+    # non-final stages to calculate load balancing loss contribution
+    # for the MoE layers within the stage. For these cases, output_tensor
+    # will be None.
+    loss, loss_dict = (None, {})
+    if False:
+        assert output_tensor is not None
+        loss, loss_dict = loss_func(loss_mask, output_tensor)
+        assert loss.numel() == 1
+
+    # NOTE: If recompute is enabled we will collect duplicate load
+    # balancing loss contributions. Prune these before calculating
+    # the load balancing loss.
+    if args.checkpoint_activations:
+        # Ignore load balancing loss contributions compute during
+        # the forward pass if recompute is turned on.
+        load_balancing_loss_data = moe.get_load_balancing_loss()
+        if args.num_layers * 2 == len(load_balancing_loss_data):
+            load_balancing_loss_data = (
+                load_balancing_loss_data[args.num_layers:])
+            moe.clear_load_balancing_loss()
+            for x in load_balancing_loss_data:
+                moe.save_load_balancing_loss(x)
+
+    # Compute the load balancing loss for all MoE layers.
+    megablocks_args = args = megablocks_utils.as_megablocks_args(args)
+    lbl = moe.batched_load_balancing_loss(megablocks_args)
+    moe.clear_load_balancing_loss()
+
+    # Average the load balancing loss across data parallel
+    # replicas and save for logging.
+    averaged_lbl = average_losses_across_data_parallel_group([lbl])
+    loss_dict['load balancing loss'] = averaged_lbl[0]
+    return averaged_lbl, loss_dict
+
+    # Compute the total loss, if necessary.
+    total_loss = loss + lbl if loss is not None else lbl
+    return total_loss, loss_dict
+
 
 def forward_step(
     data_iterator, model, neox_args, timers, return_logits=False, is_train=False
@@ -396,7 +451,10 @@ def forward_step(
         outputs, (labels, loss_mask), _fp16=neox_args.fp16_lm_cross_entropy
     )
     if neox_args.num_experts > 1:
+        # deepspeed moe
         moe_loss = neox_args.moe_loss_coeff * sum(m.item() for m in moe_losses)
+        # megablocks moe - already incorporates loss coeff
+        moe_loss += moe_loss_func(neox_args, loss_mask, outputs)[0].item()
     else:
         moe_loss = 0.
     loss = main_loss + moe_loss
