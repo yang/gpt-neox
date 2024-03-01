@@ -18,3 +18,14 @@ def assert_megablocks_is_available():
 moe = megablocks.layers.moe if megablocks_is_available() else None
 dmoe = megablocks.layers.dmoe if megablocks_is_available() else None
 arguments = megablocks.layers.arguments if megablocks_is_available() else None
+
+def as_megablocks_args(neox_args):
+    import copy
+
+    tmp = copy.copy(neox_args)
+    delattr(tmp, "mlp_type")
+    tmp.mlp_type = "mlp"
+    args = arguments.from_megatron(tmp)
+    args.moe_lbl_in_fp32 = True
+    args.moe_num_experts = tmp.num_experts
+    return args
