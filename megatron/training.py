@@ -363,14 +363,14 @@ def get_batch_sequential(forward_input, neox_args):
     )
     return (forward_input[0], forward_input[1], attention_mask)
 
+
 def average_losses_across_data_parallel_group(losses):
     """Reduce a tensor of losses across all GPUs."""
-    averaged_losses = torch.cat(
-        [loss.clone().detach().view(1) for loss in losses])
-    torch.distributed.all_reduce(averaged_losses,
-                                 group=mpu.get_data_parallel_group())
-    averaged_losses = averaged_losses / \
-        torch.distributed.get_world_size(group=mpu.get_data_parallel_group())
+    averaged_losses = torch.cat([loss.clone().detach().view(1) for loss in losses])
+    torch.distributed.all_reduce(averaged_losses, group=mpu.get_data_parallel_group())
+    averaged_losses = averaged_losses / torch.distributed.get_world_size(
+        group=mpu.get_data_parallel_group()
+    )
 
     return averaged_losses
 
@@ -397,8 +397,7 @@ def moe_loss_func(args, loss_mask, output_tensor=None):
         # the forward pass if recompute is turned on.
         load_balancing_loss_data = moe.get_load_balancing_loss()
         if args.num_layers * 2 == len(load_balancing_loss_data):
-            load_balancing_loss_data = (
-                load_balancing_loss_data[args.num_layers:])
+            load_balancing_loss_data = load_balancing_loss_data[args.num_layers :]
             moe.clear_load_balancing_loss()
             for x in load_balancing_loss_data:
                 moe.save_load_balancing_loss(x)
@@ -411,7 +410,7 @@ def moe_loss_func(args, loss_mask, output_tensor=None):
     # Average the load balancing loss across data parallel
     # replicas and save for logging.
     averaged_lbl = average_losses_across_data_parallel_group([lbl])
-    loss_dict['load balancing loss'] = averaged_lbl[0]
+    loss_dict["load balancing loss"] = averaged_lbl[0]
     return averaged_lbl, loss_dict
 
     # Compute the total loss, if necessary.
@@ -764,7 +763,7 @@ def setup_model_and_optimizer(neox_args, use_cache=False, iteration=None):
             # config_params=neox_args.deepspeed_config,
             mpu=mpu if not neox_args.is_pipe_parallel else None,
         )
-        if neox_args.num_experts > 1 and neox_args.moe_type == 'megablocks':
+        if neox_args.num_experts > 1 and neox_args.moe_type == "megablocks":
             # We need to additionally set this flag to ensure DS parallelism properly handles this foreign MoE.
             model.has_moe_layers = True
         model.total_params = get_total_params(model.module)
