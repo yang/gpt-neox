@@ -1,20 +1,19 @@
 # TODO: add copyright that includes Megablocks reference
 
+from typing import Optional
+
 import megablocks.ops
 import numpy as np
-
-from megatron.mpu.initialize import get_model_parallel_rank
-from megatron.mpu.initialize import get_model_parallel_world_size
-
-from megatron.neox_arguments.arguments import NeoXArgs
-from megatron import mpu
-from megatron.mpu import copy_to_model_parallel_region
-from megatron.mpu import gather_from_model_parallel_region
-
 import torch
 
-from megatron.model.moe_mlp import ParallelGroupedLLaMAMLP, ParallelGroupedMLP
+from megatron import mpu
+from megatron.mpu import get_expert_token_counts_for_rank
+from megatron.mpu import get_expert_tokens_for_rank
+from megatron.mpu import copy_to_model_parallel_region
+from megatron.mpu import gather_from_expert_model_parallel_region
+from megatron.neox_arguments.arguments import NeoXArgs
 
+from .moe_mlp import ParallelGroupedLLaMAMLP, ParallelGroupedMLP
 from .router import LearnedRouter
 
 def promote_scalar(x: torch.Tensor):
@@ -102,35 +101,6 @@ def clear_load_balancing_loss():
 #     scale_denominator = args.num_layers * tokens * args.moe_top_k
 #     scale = scale_numerator / scale_denominator
 #     return scale * torch.dot(tokens_per_expert, expert_scores)
-
-def get_expert_tokens_for_rank(routed_tokens: torch.Tensor, tokens_per_expert: torch.Tensor):
-    # Calculate cumulative sums of tokens_per_expert, ensure the shapes are correct
-    world_size = get_model_parallel_world_size()
-    rank = get_model_parallel_rank()
-
-    # TODO: is this check necessary here/what does it cost us to redundantly do it in multiple places?
-    assert tokens_per_expert.shape[0] % world_size == 0
-    
-    cumulative_sums = torch.cumsum(tokens_per_expert, dim=0)
-    assert cumulative_sums[-1] == routed_tokens.shape[0]
-
-    # select the right starting and ending indices from the cumsum to figure out what tokens to select
-    rank_expert_indices = cumulative_sums.chunk(world_size)
-    start_index = rank_expert_indices[rank - 1][-1] if rank > 0 else 0
-    end_index = rank_expert_indices[rank][-1]
-
-    # Use indices to select the chunk of the tokens matrix
-    selected_experts = routed_tokens[start_index:end_index]
-
-    return selected_experts
-
-def get_expert_token_counts_for_rank(tokens_per_expert: torch.Tensor):
-    # TODO: add bounds checking of size is 1D for tokens_per_expert
-    # should be (num_experts) long
-    world_size = get_model_parallel_world_size()
-    rank = get_model_parallel_rank()
-
-    return tokens_per_expert.chunk(world_size)[rank]
 
 
 class ParallelDroplessMLP(torch.nn.Module):
@@ -254,29 +224,44 @@ class ParallelDroplessMLP(torch.nn.Module):
         """
         # Route the tokens for MoE computation.
         ## stack (sl, bs, hs) into (sl * bs, hs)
+        print(f"{torch.cuda.current_device()}: before view {input_.shape}")
         input_ = input_.view(-1, input_.shape[-1])
+        print(f"{torch.cuda.current_device()}: after view {input_.shape}")
 
         ## repeat each token top_k times and shuffle tokens to group them by their respective experts
         input_ = megablocks.ops.gather(input_, indices, bin_ids, bins, top_k)
+        print(f"{torch.cuda.current_device()}: after gather {input_.shape}")
 
         # QUESTION: is this sufficient for backprop/how does input_parallel actually get used?
         # Set up backprop all-reduce.
+        # TODO: probably need to make a MoE version of this too...
         input_parallel = copy_to_model_parallel_region(input_)
+        print(f"{torch.cuda.current_device()}: input_parallel {input_parallel.shape}")
 
         # get tokens routed to this rank's experts only
+        # TODO: move this operation into copy_to_expert_parallel_region
+        #       this will fit more cleanly with the custom backward that
+        #       needs to be added there
         input_parallel = get_expert_tokens_for_rank(input_parallel, tokens_per_expert)
+        print(f"{torch.cuda.current_device()}: input_parallel after slice {input_parallel.shape}")
         # get tokens_per_expert for this rank's experts only
         local_tokens_per_expert = get_expert_token_counts_for_rank(tokens_per_expert)
+        print(f"{torch.cuda.current_device()}: local_tokens_per_expert {local_tokens_per_expert}, global tokens {tokens_per_expert}")
 
         # Perform the expert computation for this rank's experts
         output_parallel = self.mlp(input_parallel, local_tokens_per_expert)
+        print(f"{torch.cuda.current_device()}: output_parallel {output_parallel.shape}")
 
         # all gather masked results from across Tensor parallel ranks here and cat them together
         # this will replicate the calculation of each expert across all ranks
         # NOTE: this combined all_gather and torch.cat operation is performed by gather_from_model_parallel_region(output_parallel)
         # Unlike ColumnParallelLinear, it is nonsensical in the MoE world
         # to optionally return the output_parallel result...we still have to scatter the tokens back to their original positions
-        output = gather_from_model_parallel_region(output_parallel)
+        output = gather_from_expert_model_parallel_region(
+            output_parallel,
+            tokens_per_expert,
+        )
+        print(f"{torch.cuda.current_device()}: output {output.shape}")
 
         # Un-route the data for the MoE output
         return megablocks.ops.scatter(
@@ -316,19 +301,21 @@ class ParallelDroplessMLP(torch.nn.Module):
             bins,
             self.top_k,
         )
+        print(f"{torch.cuda.current_device()}: {out.shape}")
         return out, tokens_per_expert
 
     def forward(self, x, scores, expert_weights, expert_indices):
         # save shape so we can re-shape the outputs later
         in_shape = x.size()
+        print(f"{torch.cuda.current_device()}: {in_shape}")
 
         # Compute the experts.
         x, tokens_per_expert = self.forward_once(x, expert_weights, expert_indices)
         
         # save load balancing loss
         # TODO: this is based on megatron-only...how does this work in the megatron-deepspeed world?
-        if self.training:
-            save_load_balancing_loss((tokens_per_expert, scores))
+        # if self.training:
+            # save_load_balancing_loss((tokens_per_expert, scores))
         
         # restore input shape
         x = x.view(in_shape)
@@ -347,9 +334,6 @@ def cast_if_autocast_enabled(tensor: torch.Tensor):
     return tensor
 
 class ParallelDroplessMoE(torch.nn.Module):
-    """
-    TODO: add check to ensure world_size >= num experts...otherwise you end up cutting experts across ranks. which is bad
-    """
     def __init__(
             self,
             neox_args: NeoXArgs,
@@ -371,7 +355,8 @@ class ParallelDroplessMoE(torch.nn.Module):
 
     def forward(self, x):
         # we expect inputs as (sl, bs, hs)
-        # neox also provides inputs as (sl, bs, hs)
+        # neox provides inputs as torch.Size([2048, 4, 768])
+        # (sl, bs, hs)
 
         # NOTE: If we're going to cast the activations to lower precision
         # do it before we permute the tokens to save bandwidth
