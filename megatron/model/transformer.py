@@ -920,9 +920,57 @@ class ParallelTransformerLayer(nn.Module):
                     else args.moe_eval_capacity_factor
                 )
                 if capacity_factor > 0:
-                    self.mlp = dMoE(neox_args, init_method, output_layer_init_method)
-                else:
                     self.mlp = MbMoE(neox_args, init_method, output_layer_init_method)
+                else:
+                    self.mlp = dMoE(neox_args, init_method, output_layer_init_method)
+
+                def integrate_megablocks_with_ds_expert_parallelism():
+                    # We make megablocks work with DS parallelism.
+                    #
+                    # We fool DS into accepting these MoE parameters as its own DS MoE params,
+                    # which makes things work with the underlying expert parallelism,
+                    # including TED parallelism.
+                    #
+                    # Effectively, we want to:
+                    # 
+                    # - Make DS's data parallel gradient all-reduction skip these params.
+                    # - But make these params participate in the expert parallel all-reduction!
+                    #
+                    # Further background:
+                    #
+                    # Normally, with the original megablocks demo codebase, it
+                    # only supports 1 copy of any expert throughout
+                    # the network, since it uses EP group = DP group.
+                    #
+                    # First, we trigger DS initialization of the MoE expert parallel groups and internal state.
+                    throwaway = MoE(
+                        args.hidden_size,
+                        get_mlp(
+                            "regular",
+                            MOE=True,
+                            MoE_mp_size=moe_mp_size,
+                        ),
+                        num_experts=self.num_experts,
+                        ep_size=mpu.get_data_parallel_world_size(),
+                        k=args.moe_top_k,
+                        use_residual=args.moe_use_residual,
+                        capacity_factor=args.moe_train_capacity_factor,
+                        eval_capacity_factor=args.moe_eval_capacity_factor,
+                        min_capacity=args.moe_min_capacity,
+                        drop_tokens=args.moe_token_dropping,
+                        use_tutel=args.use_tutel,
+                    )
+                    throwaway.set_deepspeed_parallelism()
+
+                    # Next, we trick DS into seeing these as its own MoE params.
+                    for param in self.mlp.parameters():
+                        if getattr(param,'expert_model_parallel',None) is not None:
+                            # is_moe_param looks for this attr.
+                            param.allreduce = False
+                            param.group_name = throwaway.expert_group_name
+
+                integrate_megablocks_with_ds_expert_parallelism()
+
             else:
                 raise KeyError(neox_args.moe_type)
 
