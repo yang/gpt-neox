@@ -764,6 +764,9 @@ def setup_model_and_optimizer(neox_args, use_cache=False, iteration=None):
             # config_params=neox_args.deepspeed_config,
             mpu=mpu if not neox_args.is_pipe_parallel else None,
         )
+        if neox_args.num_experts > 1 and neox_args.moe_type == 'megablocks':
+            # We need to additionally set this flag to ensure DS parallelism properly handles this foreign MoE.
+            model.has_moe_layers = True
         model.total_params = get_total_params(model.module)
         print_rank_0(f' > total params: {"{:,}".format(model.total_params)}')
 
