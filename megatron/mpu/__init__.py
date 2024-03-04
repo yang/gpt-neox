@@ -46,6 +46,7 @@ from .layers import VocabParallelEmbedding
 from .layers import ParallelRelativePositionBias
 
 from .mappings import copy_to_model_parallel_region
+from .mappings import copy_to_expert_model_parallel_region
 from .mappings import gather_from_model_parallel_region
 from .mappings import gather_from_expert_model_parallel_region
 from .mappings import reduce_from_model_parallel_region

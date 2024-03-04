@@ -9,7 +9,7 @@ import torch
 from megatron import mpu
 from megatron.mpu import get_expert_token_counts_for_rank
 from megatron.mpu import get_expert_tokens_for_rank
-from megatron.mpu import copy_to_model_parallel_region
+from megatron.mpu import copy_to_expert_model_parallel_region
 from megatron.mpu import gather_from_expert_model_parallel_region
 from megatron.neox_arguments.arguments import NeoXArgs
 
@@ -224,33 +224,21 @@ class ParallelDroplessMLP(torch.nn.Module):
         """
         # Route the tokens for MoE computation.
         ## stack (sl, bs, hs) into (sl * bs, hs)
-        print(f"{torch.cuda.current_device()}: before view {input_.shape}")
         input_ = input_.view(-1, input_.shape[-1])
-        print(f"{torch.cuda.current_device()}: after view {input_.shape}")
 
         ## repeat each token top_k times and shuffle tokens to group them by their respective experts
         input_ = megablocks.ops.gather(input_, indices, bin_ids, bins, top_k)
-        print(f"{torch.cuda.current_device()}: after gather {input_.shape}")
-
-        # QUESTION: is this sufficient for backprop/how does input_parallel actually get used?
-        # Set up backprop all-reduce.
-        # TODO: probably need to make a MoE version of this too...
-        input_parallel = copy_to_model_parallel_region(input_)
-        print(f"{torch.cuda.current_device()}: input_parallel {input_parallel.shape}")
 
         # get tokens routed to this rank's experts only
-        # TODO: move this operation into copy_to_expert_parallel_region
-        #       this will fit more cleanly with the custom backward that
-        #       needs to be added there
-        input_parallel = get_expert_tokens_for_rank(input_parallel, tokens_per_expert)
-        print(f"{torch.cuda.current_device()}: input_parallel after slice {input_parallel.shape}")
+        input_parallel = copy_to_expert_model_parallel_region(input_, tokens_per_expert)
+
         # get tokens_per_expert for this rank's experts only
-        local_tokens_per_expert = get_expert_token_counts_for_rank(tokens_per_expert)
-        print(f"{torch.cuda.current_device()}: local_tokens_per_expert {local_tokens_per_expert}, global tokens {tokens_per_expert}")
+        with torch.no_grad():
+            local_tokens_per_expert = get_expert_token_counts_for_rank(tokens_per_expert)
+            print(f"{torch.cuda.current_device()}: local_tokens_per_expert {local_tokens_per_expert}, global tokens {tokens_per_expert}")
 
         # Perform the expert computation for this rank's experts
         output_parallel = self.mlp(input_parallel, local_tokens_per_expert)
-        print(f"{torch.cuda.current_device()}: output_parallel {output_parallel.shape}")
 
         # all gather masked results from across Tensor parallel ranks here and cat them together
         # this will replicate the calculation of each expert across all ranks
@@ -261,7 +249,6 @@ class ParallelDroplessMLP(torch.nn.Module):
             output_parallel,
             tokens_per_expert,
         )
-        print(f"{torch.cuda.current_device()}: output {output.shape}")
 
         # Un-route the data for the MoE output
         return megablocks.ops.scatter(
@@ -301,13 +288,11 @@ class ParallelDroplessMLP(torch.nn.Module):
             bins,
             self.top_k,
         )
-        print(f"{torch.cuda.current_device()}: {out.shape}")
         return out, tokens_per_expert
 
     def forward(self, x, scores, expert_weights, expert_indices):
         # save shape so we can re-shape the outputs later
         in_shape = x.size()
-        print(f"{torch.cuda.current_device()}: {in_shape}")
 
         # Compute the experts.
         x, tokens_per_expert = self.forward_once(x, expert_weights, expert_indices)

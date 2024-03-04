@@ -18,13 +18,14 @@
 import torch
 
 from .initialize import (
+    get_expert_tokens_for_rank,
     get_model_parallel_group,
     get_model_parallel_world_size,
     get_model_parallel_rank,
     get_fp32_allreduce,
     get_expert_token_counts_for_rank,
 )
-from .utils import split_tensor_along_first_dim, split_tensor_along_last_dim
+from .utils import split_tensor_along_last_dim
 
 
 def _reduce(input_):
@@ -99,15 +100,10 @@ def _gather(input_):
     return output
 
 
-def _dmoe_split(input_, tokens_per_expert):
-    """Split the tensor along its first dimension and keep the
-    corresponding slice."""
-
-    raise NotImplementedError("Not here yet")
-
-    world_size = get_model_parallel_world_size()
+def _dmoe_reduce(input_, tokens_per_expert):
+    """All-reduce the the dMoE input tensor across model parallel group."""
     # Bypass the function if we are using only 1 GPU.
-    if world_size == 1:
+    if get_model_parallel_world_size() == 1:
         return input_
 
     # Bf16 convert
@@ -115,16 +111,44 @@ def _dmoe_split(input_, tokens_per_expert):
     if dt == torch.bfloat16 and get_fp32_allreduce():
         input_ = input_.float()
 
-    # Split along first dimension
-    input_list = split_tensor_along_first_dim(input_, world_size)
-
-    # Note: torch.split does not create contiguous tensors by default.
+    output = torch.zeros(
+        (sum(tokens_per_expert), input_.shape[-1]),
+        dtype=input_.dtype,
+        device=input_.device,
+    )
+    world_size = get_model_parallel_world_size()
     rank = get_model_parallel_rank()
-    output = input_list[rank].contiguous()
+
+    cumulative_sums = torch.cumsum(tokens_per_expert, dim=0)
+
+    # select the right starting and ending indices from the cumsum to figure out what tokens to select
+    rank_expert_indices = cumulative_sums.chunk(world_size)
+    start_index = rank_expert_indices[rank - 1][-1] if rank > 0 else 0
+    end_index = rank_expert_indices[rank][-1]
+
+    output[start_index:end_index] = input_
+
+    # All-reduce.
+    torch.distributed.all_reduce(output, group=get_model_parallel_group())
 
     # Bf16 convert
     if dt == torch.bfloat16 and get_fp32_allreduce():
         output = output.bfloat16()
+
+    return output
+
+
+def _dmoe_split(input_, tokens_per_expert):
+    """Split the tensor along its first dimension according to where tokens
+    were routed, keeping the corresponding slice."""
+
+    world_size = get_model_parallel_world_size()
+    # Bypass the function if we are using only 1 GPU.
+    if world_size == 1:
+        return input_
+
+    # Split along first dimension, getting the expert tokens
+    output = get_expert_tokens_for_rank(input_, tokens_per_expert)
 
     return output
 
@@ -183,6 +207,31 @@ class _CopyToModelParallelRegion(torch.autograd.Function):
         return _reduce(grad_output)
 
 
+class _CopyToExpertModelParallelRegion(torch.autograd.Function):
+    """Pass the input to the model parallel region."""
+
+    @staticmethod
+    def symbolic(graph, input_, tokens_per_expert):
+        # TODO: not sure if this is sufficient? not sure how this gets used downstream...
+        return get_expert_tokens_for_rank(input_, tokens_per_expert)
+
+    @staticmethod
+    def forward(ctx, input_, tokens_per_expert):
+        # Save tokens_per_expert in the context for later use in the backward pass
+        ctx.save_for_backward(tokens_per_expert)
+
+        return get_expert_tokens_for_rank(input_, tokens_per_expert)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Retrieve the tokens_per_expert from the context
+        tokens_per_expert, = ctx.saved_tensors
+
+        # no grad for tokens_per_expert
+        # return _dmoe_reduce(grad_output, tokens_per_expert), None
+        return _dmoe_gather(grad_output, tokens_per_expert), None
+
+
 class _ReduceFromModelParallelRegion(torch.autograd.Function):
     """All-reduce the input from the model parallel region."""
 
@@ -234,9 +283,7 @@ class _GatherFromExpertModelParallelRegion(torch.autograd.Function):
     """Gather the input from expert model parallel region and concatinate.
     
     The major difference between this and _GatherFromModelParallelRegion is in the
-    dMoE case, we need to gather & split along the first dimension, not the 
-
-    TODO: in the backward pass, we probably need to get info about which tokens went where back into here?
+    dMoE case, we need to gather & split along the first dimension, not the last
     """
 
     @staticmethod
@@ -256,7 +303,8 @@ class _GatherFromExpertModelParallelRegion(torch.autograd.Function):
         # Retrieve the tokens_per_expert from the context
         tokens_per_expert, = ctx.saved_tensors
         
-        return _dmoe_split(grad_output, tokens_per_expert)
+        # no grad for tokens_per_expert
+        return _dmoe_split(grad_output, tokens_per_expert), None
 
 
 # -----------------
@@ -266,6 +314,10 @@ class _GatherFromExpertModelParallelRegion(torch.autograd.Function):
 
 def copy_to_model_parallel_region(input_):
     return _CopyToModelParallelRegion.apply(input_)
+
+
+def copy_to_expert_model_parallel_region(input_, tokens_per_expert):
+    return _CopyToExpertModelParallelRegion.apply(input_, tokens_per_expert)
 
 
 def reduce_from_model_parallel_region(input_):
