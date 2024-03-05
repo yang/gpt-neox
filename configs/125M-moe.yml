@@ -5,7 +5,7 @@
    # 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
    # Experts would be in layers:
    # 0, 2, 4, 6, 8, 10
-   "num_experts": 4,
+   "moe_num_experts": 4,
 
    # parallelism settings ( you will want to change these based on your cluster setup, ideally scheduling pipeline stages
    # across the node boundaries )

@@ -296,7 +296,6 @@ class _MegablocksAdapter(nn.Module):
         if neox_args.moe_glu:
             args.mlp_type = "glu"
 
-        args.moe_loss_weight = neox_args.moe_loss_coeff
         self.moe = layer_cls(args)
 
     def forward(self, x):
@@ -1042,7 +1041,7 @@ class ParallelTransformerLayer(nn.Module):
                 raise KeyError(mlp_type)
 
         self.num_experts = (
-            neox_args.num_experts
+            neox_args.moe_num_experts
             if layer_number % neox_args.expert_interval == 0
             else 1
         )

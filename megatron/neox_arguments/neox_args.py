@@ -95,21 +95,10 @@ class NeoXArgsMoE(NeoXArgsTemplate):
     Mixture of Expert (MoE) Arguments
     """
 
-    moe_num_experts: int = 1
-    """
-    The number of experts in MoE layers. MoE
-    layers not used if set to 1
-    """
-
     moe_top_k: int = 1
     """
     'The number of experts each token is routed to
     in MoE layers.
-    """
-
-    moe_loss_weight: float = 0.1
-    """
-    The weight for the MoE auxiliary load balancing loss.
     """
 
     moe_lbl_in_fp32: bool = False
@@ -1276,7 +1265,7 @@ class NeoXArgsTextgen(NeoXArgsTemplate):
     Use Tutel optimizations in MoE
     """
 
-    num_experts: int = 1
+    moe_num_experts: int = 1
     """
     Number of MoE experts
     """

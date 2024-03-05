@@ -27,5 +27,5 @@ def as_megablocks_args(neox_args):
     tmp.mlp_type = "mlp"
     args = arguments.from_megatron(tmp)
     args.moe_lbl_in_fp32 = True
-    args.moe_num_experts = tmp.num_experts
+    args.moe_loss_weight = neox_args.moe_loss_coeff
     return args
