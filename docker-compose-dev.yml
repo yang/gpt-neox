@@ -1,0 +1,25 @@
+version: '3'
+services:
+  gpt-neox:
+    command: nvidia-smi dmon
+    image: gpt-neox:cuda121
+    shm_size: 1g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    environment:
+      PYTHONPATH: /home/mchorse/gpt-neox
+    logging:
+      options:
+        max-size: "100m"
+        max-file: "3"
+    volumes:
+      - .:/home/mchorse/gpt-neox

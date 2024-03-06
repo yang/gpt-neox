@@ -90,6 +90,30 @@ class NeoXArgsParallelism(NeoXArgsTemplate):
 
 
 @dataclass
+class NeoXArgsMoE(NeoXArgsTemplate):
+    """
+    Mixture of Expert (MoE) Arguments
+    """
+
+    moe_top_k: int = 1
+    """
+    'The number of experts each token is routed to
+    in MoE layers.
+    """
+
+    moe_lbl_in_fp32: bool = False
+    """
+    Whether to compute the load balancing loss in fp32.
+    """
+
+    moe_jitter_eps: float = None
+    """
+    Coefficient for MoE routing jitter. Jitter is 
+    not used if set to None
+    """
+
+
+@dataclass
 class NeoXArgsModel(NeoXArgsTemplate):
     """
     Model Arguments
@@ -180,9 +204,9 @@ class NeoXArgsModel(NeoXArgsTemplate):
     Scalenorm epsilon
     """
 
-    pos_emb: Literal[
-        "learned", "rotary", "sinusoidal", "rpe", "alibi", "none"
-    ] = "learned"
+    pos_emb: Literal["learned", "rotary", "sinusoidal", "rpe", "alibi", "none"] = (
+        "learned"
+    )
     """
     Type of positional embedding to use - choose from 'learned', 'rotary', 'sinusoidal', 'rpe', 'none'
     """
@@ -1231,6 +1255,56 @@ class NeoXArgsTextgen(NeoXArgsTemplate):
     NOTE: Requires internet connection
     """
 
+    use_tutel: bool = False
+    """
+    Use Tutel optimizations in MoE
+    """
+
+    moe_num_experts: int = 1
+    """
+    Number of MoE experts
+    """
+
+    moe_loss_coeff: float = 0.1
+    """
+    Coefficient for MoE loss
+    """
+
+    moe_train_capacity_factor: float = 1.0
+    """
+    The capacity of the expert at train time
+    """
+
+    moe_eval_capacity_factor: float = 1.0
+    """
+    The capacity of the expert at eval time
+    """
+
+    moe_min_capacity: int = 4
+    """
+    The minimum capacity per expert regardless of the capacity_factor
+    """
+
+    moe_token_dropping: bool = True
+    """
+    Whether to drop tokens when exceeding capacity
+    """
+
+    create_moe_param_group: bool = True
+    """
+    Whether to create a separate parameter group for MoE parameters
+    """
+
+    moe_use_residual: bool = True
+    """
+    Whether to use residual in MoE
+    """
+
+    moe_expert_parallel_size: int = 1
+    """
+    Number of parallel experts in MoE
+    """
+
     moe_top_k: int = 1
     """
     Activate top K experts in MoE
@@ -1284,4 +1358,14 @@ class NeoXArgsTextgen(NeoXArgsTemplate):
     moe_expert_parallel_size: int = 1
     """
     Number of parallel experts in MoE
+    """
+
+    moe_type: str = "deepspeed"
+    """
+    Either `deepspeed` or `megablocks`
+    """
+
+    moe_glu: bool = False
+    """
+    Use gated linear units in MoE
     """

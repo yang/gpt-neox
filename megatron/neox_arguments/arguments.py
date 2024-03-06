@@ -42,6 +42,7 @@ from .neox_args import (
     NeoXArgsTokenizer,
     NeoXArgsTraining,
     NeoXArgsParallelism,
+    NeoXArgsMoE,
     NeoXArgsLogging,
     NeoXArgsOther,
     NeoXArgsTextgen,
@@ -89,6 +90,7 @@ BASE_CLASSES = [
     NeoXArgsDeepspeedRunner,
     NeoXArgsDeepspeedConfig,
     NeoXArgsModel,
+    NeoXArgsMoE,
     NeoXArgsLRScheduler,
     NeoXArgsOptimizer,
     NeoXArgsTokenizer,
@@ -180,7 +182,6 @@ class NeoXArgs(*BASE_CLASSES):
         config_files = dict()
         # iterate of all to be loaded yaml files
         for conf_file_name in paths_to_yml_files:
-
             # load file
             with open(conf_file_name) as conf_file:
                 conf = yaml.load(conf_file, Loader=yaml.FullLoader)
@@ -477,7 +478,6 @@ class NeoXArgs(*BASE_CLASSES):
         return extra_ds_args
 
     def get_deepspeed_main_args(self):
-
         args_list = list()
 
         if self.autotuning_run is not None:
@@ -803,7 +803,6 @@ class NeoXArgs(*BASE_CLASSES):
 
     @staticmethod
     def check_batch_parameters(dp_world_size, train_batch, micro_batch, grad_acc):
-
         assert (
             train_batch > 0
         ), f"Train batch size: {train_batch} has to be greater than 0"
@@ -1034,13 +1033,15 @@ class NeoXArgs(*BASE_CLASSES):
         # if we set pipe_parallel_size to 0 or 1, GPT2ModelPipe.to_sequential() is called, and we run training with
         # the sequential model without the PipelineModule wrapper to avoid the overhead it incurs
         self.update_value(
-            "is_pipe_parallel", self.pipe_parallel_size > 1 and self.num_experts == 1
+            "is_pipe_parallel",
+            self.pipe_parallel_size > 1 and self.moe_num_experts == 1,
         )
-        if self.num_experts > 1:
+        if self.moe_num_experts > 1:
             assert not (
                 self.is_pipe_parallel or self.pipe_parallel_size > 1
             ), "MoE not supported with pipeline parallelism"
             assert self.zero_optimization["stage"] != 3, "MoE not compatible with zero3"
+            assert self.mlp_type == "regular", "MoE not compatible with LLaMA"
 
         # Attention config
         if self.attention_config is None:
@@ -1211,7 +1212,6 @@ class NeoXArgs(*BASE_CLASSES):
 
         # Parameters sharing does not work with torch DDP.
         if (self.num_unique_layers is not None) and (self.num_layers is not None):
-
             if not (self.num_unique_layers <= self.num_layers):
                 error_message = (
                     self.__class__.__name__
