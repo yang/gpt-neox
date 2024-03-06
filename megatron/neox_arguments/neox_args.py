@@ -1255,11 +1255,6 @@ class NeoXArgsTextgen(NeoXArgsTemplate):
     NOTE: Requires internet connection
     """
 
-    moe_top_k: int = 1
-    """
-    Activate top K experts in MoE
-    """
-
     use_tutel: bool = False
     """
     Use Tutel optimizations in MoE
