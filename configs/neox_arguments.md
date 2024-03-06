@@ -111,7 +111,7 @@ Logging Arguments
 
 - **git_hash**: str
 
-    Default = 2a3c4e1
+    Default = 8af4181
 
     current git hash of repository
 
@@ -244,6 +244,38 @@ Logging Arguments
     Default = 12
 
     Step to stop profiling at.
+
+
+
+## NeoXArgsMoE
+
+Mixture of Expert (MoE) Arguments
+
+
+
+- **moe_top_k**: int
+
+    Default = 1
+
+    'The number of experts each token is routed to
+    in MoE layers.
+
+
+
+- **moe_lbl_in_fp32**: bool
+
+    Default = False
+
+    Whether to compute the load balancing loss in fp32.
+
+
+
+- **moe_jitter_eps**: float
+
+    Default = None
+
+    Coefficient for MoE routing jitter. Jitter is 
+    not used if set to None
 
 
 
@@ -1007,6 +1039,14 @@ Parallelism Arguments
 
 
 
+- **expert_interval**: int
+
+    Default = 2
+
+    Have one MoE layer every expert_interval layers
+
+
+
 ## NeoXArgsTemplate
 
 NeoXArgsTemplate()
@@ -1125,6 +1165,118 @@ Text Generation arguments
     Tasks to evaluate on using lm_eval_harness
 
     NOTE: Requires internet connection
+
+
+
+- **use_tutel**: bool
+
+    Default = False
+
+    Use Tutel optimizations in MoE
+
+
+
+- **moe_num_experts**: int
+
+    Default = 1
+
+    Number of MoE experts
+
+
+
+- **moe_loss_coeff**: float
+
+    Default = 0.1
+
+    Coefficient for MoE loss
+
+
+
+- **moe_train_capacity_factor**: float
+
+    Default = 1.0
+
+    The capacity of the expert at train time
+
+
+
+- **moe_eval_capacity_factor**: float
+
+    Default = 1.0
+
+    The capacity of the expert at eval time
+
+
+
+- **moe_min_capacity**: int
+
+    Default = 4
+
+    The minimum capacity per expert regardless of the capacity_factor
+
+
+
+- **moe_token_dropping**: bool
+
+    Default = True
+
+    Whether to drop tokens when exceeding capacity
+
+
+
+- **create_moe_param_group**: bool
+
+    Default = True
+
+    Whether to create a separate parameter group for MoE parameters
+
+
+
+- **moe_use_residual**: bool
+
+    Default = True
+
+    Whether to use residual in MoE
+
+
+
+- **moe_expert_parallel_size**: int
+
+    Default = 1
+
+    Number of parallel experts in MoE
+
+
+
+- **moe_top_k**: int
+
+    Default = 1
+
+    Activate top K experts in MoE
+
+
+
+- **num_experts**: int
+
+    Default = 1
+
+    Number of MoE experts
+
+
+
+- **moe_type**: str
+
+    Default = deepspeed
+
+    Either `deepspeed` or `megablocks`
+
+
+
+- **moe_glu**: bool
+
+    Default = False
+
+    Use gated linear units in MoE
 
 
 
