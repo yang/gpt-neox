@@ -96,7 +96,7 @@ def do_forward_pass(neox_args, model, inference=False):
         tokens, attention_mask, position_ids = get_batch(
             neox_args, context_tokens_tensor[:, : neox_args.seq_length]
         )
-        logits = model((tokens, position_ids, attention_mask))
+        logits, aux = model((tokens, position_ids, attention_mask))
 
     # reset to train mode, if model was in training before
     if model_was_in_train:

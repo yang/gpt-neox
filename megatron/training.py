@@ -54,7 +54,7 @@ from megatron.utils import (
     get_total_params,
     CharCounter,
 )
-from megatron.model.gpt2_model import cross_entropy
+from megatron.model.gpt2_model import cross_entropy, Bundle
 
 from pickle import dump
 import os
@@ -410,12 +410,9 @@ def moe_loss_func(args, loss_mask, output_tensor=None):
     # Average the load balancing loss across data parallel
     # replicas and save for logging.
     averaged_lbl = average_losses_across_data_parallel_group([lbl])
-    loss_dict["load balancing loss"] = averaged_lbl[0]
-    return averaged_lbl, loss_dict
-
-    # Compute the total loss, if necessary.
-    total_loss = loss + lbl if loss is not None else lbl
-    return total_loss, loss_dict
+    return averaged_lbl
+    # loss_dict["load balancing loss"] = averaged_lbl[0]
+    # return averaged_lbl, loss_dict
 
 
 def forward_step(
@@ -444,11 +441,8 @@ def forward_step(
 
     # Sequential returns moe_losses, but this is not yet supported by pipe parallel
     maybe_tuple = model((tokens, position_ids, attention_mask), neox_args=neox_args)
-    if type(maybe_tuple) is tuple:
-        outputs, moe_losses = maybe_tuple
-    else:
-        outputs = maybe_tuple
-        moe_losses = []
+    assert type(maybe_tuple) is Bundle
+    outputs, moe_losses = maybe_tuple.tup()
     if (
         is_train
         and neox_args.curriculum_learning
@@ -460,12 +454,17 @@ def forward_step(
         outputs, (labels, loss_mask), _fp16=neox_args.fp16_lm_cross_entropy
     )
     if neox_args.moe_num_experts > 1:
-        # deepspeed moe
-        moe_loss = neox_args.moe_loss_coeff * sum(m.item() for m in moe_losses)
-        # megablocks moe - already incorporates loss coeff
-        moe_loss += moe_loss_func(neox_args, loss_mask, outputs)[0].item()
+        if neox_args.moe_type == "deepspeed":
+            moe_coeff = neox_args.moe_loss_coeff
+        elif neox_args.moe_type == "megablocks":
+            # megablocks moe already incorporates loss coeff
+            moe_coeff = 1
+        else:
+            raise KeyError()
+        moe_loss = moe_coeff * sum(m.detach().item() for m in moe_losses)
     else:
         moe_loss = 0.0
+    print("moe_loss", moe_loss)
     loss = main_loss + moe_loss
     if neox_args.memory_profiling:
         torch.cuda.nvtx.range_pop()
@@ -761,7 +760,7 @@ def setup_model_and_optimizer(neox_args, use_cache=False, iteration=None):
             model_parameters=_model_params,
             # Need to remove the below so that it doesn't conflict with --deepspeed_config required by autotuning
             # config_params=neox_args.deepspeed_config,
-            mpu=mpu if not neox_args.is_pipe_parallel else None,
+            mpu=mpu,  # if not neox_args.is_pipe_parallel else None,
         )
         if neox_args.moe_num_experts > 1 and neox_args.moe_type == "megablocks":
             # We need to additionally set this flag to ensure DS parallelism properly handles this foreign MoE.

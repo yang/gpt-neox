@@ -1037,9 +1037,9 @@ class NeoXArgs(*BASE_CLASSES):
             self.pipe_parallel_size > 1 and self.moe_num_experts == 1,
         )
         if self.moe_num_experts > 1:
-            assert not (
-                self.is_pipe_parallel or self.pipe_parallel_size > 1
-            ), "MoE not supported with pipeline parallelism"
+            # assert not (
+            #     self.is_pipe_parallel or self.pipe_parallel_size > 1
+            # ), "MoE not supported with pipeline parallelism"
             assert self.zero_optimization["stage"] != 3, "MoE not compatible with zero3"
             assert self.mlp_type == "regular", "MoE not compatible with LLaMA"
 

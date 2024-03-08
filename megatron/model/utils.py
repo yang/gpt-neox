@@ -166,8 +166,6 @@ class SequentialWrapper(torch.nn.Module):
                 ].contiguous()
             forward_input = (tokens, input_ids, attention_mask)
 
-        moe_losses = []
-
         def exec_range_func(start, end):
             """Helper function to be used with checkpoint()
             Adapted from torch.utils.checkpoint:checkpoint_sequential()
@@ -179,8 +177,6 @@ class SequentialWrapper(torch.nn.Module):
                     inputs = inputs[0]
                 for idx, layer in enumerate(self.sequential[start:end]):
                     inputs = layer(inputs)
-                    if hasattr(layer, 'last_moe_loss'):
-                        moe_losses.append(layer.last_moe_loss)
                 return inputs
 
             return exec_func
@@ -208,7 +204,7 @@ class SequentialWrapper(torch.nn.Module):
                     )
                 else:
                     x = exec_range_func(start_idx, end_idx)(*x)
-        return x, moe_losses
+        return x
 
     def clear_cache(self):
         """

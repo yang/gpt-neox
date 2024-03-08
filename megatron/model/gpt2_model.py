@@ -91,6 +91,47 @@ def _post_transformer_block(args):
     return fn(args)
 
 
+# Avoid using tuple because of SequentialWrapper auto-flattening
+class Bundle:
+    def __init__(self, x, auxes):
+        self.x = x
+        self.auxes = auxes
+
+    def tup(self):
+        return self.x, self.auxes
+
+
+class AddAux(torch.nn.Module):
+    def __init__(self, cls, *args, **kwargs):
+        super().__init__()
+        self.module = cls(*args, **kwargs)
+
+    def forward(self, x):
+        x, aux = self.module(x)
+        return Bundle(x, [aux])
+
+
+class AccumAux(torch.nn.Module):
+    def __init__(self, cls, *args, **kwargs):
+        super().__init__()
+        self.module = cls(*args, **kwargs)
+
+    def forward(self, bundle):
+        x, auxes = bundle.tup()
+        x, aux = self.module(x)
+        return Bundle(x, auxes + [aux])
+
+
+class CarryAux(torch.nn.Module):
+    def __init__(self, cls, *args, **kwargs):
+        super().__init__()
+        self.module = cls(*args, **kwargs)
+
+    def forward(self, bundle):
+        x, auxes = bundle.tup()
+        return Bundle(self.module(x), auxes)
+
+
 class GPT2ModelPipe(PipelineModule, torch.nn.Module):
     """GPT2Model adapted for pipeline parallelism.
 
@@ -130,9 +171,11 @@ class GPT2ModelPipe(PipelineModule, torch.nn.Module):
             layers=self.specs,
             loss_fn=partial(cross_entropy, _fp16=self.neox_args.fp16_lm_cross_entropy),
             topology=topology,
-            activation_checkpoint_interval=self.neox_args.checkpoint_num_layers
-            if self.neox_args.checkpoint_activations
-            else 0,
+            activation_checkpoint_interval=(
+                self.neox_args.checkpoint_num_layers
+                if self.neox_args.checkpoint_activations
+                else 0
+            ),
             partition_method=neox_args.pipe_partition_method,
             checkpointable_layers=["GMLPBlock", "ParallelTransformerLayerPipe"],
         )
@@ -234,6 +277,7 @@ class GPT2ModelPipe(PipelineModule, torch.nn.Module):
             if layer_type in ["gmlp", "amlp"]:
                 self.specs.append(
                     LayerSpec(
+                        AccumAux if i > 0 else AddAux,
                         GMLPBlock,
                         init_method=self.init_method,
                         layer_number=i,
@@ -245,6 +289,7 @@ class GPT2ModelPipe(PipelineModule, torch.nn.Module):
             else:
                 self.specs.append(
                     LayerSpec(
+                        AccumAux if i > 0 else AddAux,
                         ParallelTransformerLayerPipe,
                         neox_args=self.neox_args,
                         attention_mask_func=gpt2_attention_mask_func,
@@ -258,12 +303,12 @@ class GPT2ModelPipe(PipelineModule, torch.nn.Module):
                 )
 
         # used to drop attention mask + reshape hidden states
-        self.specs.append(_post_transformer_block)
+        self.specs.append(CarryAux(Lambda, _post_transformer_block))
 
         # NormPipe is a (deprecated) helper class that used to be used to pass presents along the pipeline - since presents are now cached to the `TransformerLayer` class this is no longer needed
         norm, eps = get_norm(self.neox_args)
         self.specs.append(
-            LayerSpec(NormPipe, norm, self.neox_args.hidden_size, eps=eps)
+            LayerSpec(CarryAux, NormPipe, norm, self.neox_args.hidden_size, eps=eps)
         )
 
         # outputs are now a single tensor: hidden_states
@@ -287,6 +332,7 @@ class GPT2ModelPipe(PipelineModule, torch.nn.Module):
             self.specs.append(
                 TiedLayerSpec(
                     "embed",
+                    CarryAux,
                     EmbeddingPipe,
                     self.neox_args,
                     self.hidden_size,
@@ -302,6 +348,7 @@ class GPT2ModelPipe(PipelineModule, torch.nn.Module):
         else:
             self.specs.append(
                 LayerSpec(
+                    CarryAux,
                     ParallelLinearPipe,
                     neox_args=self.neox_args,
                     init_method=self.init_method,
