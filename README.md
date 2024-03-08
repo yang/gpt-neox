@@ -67,6 +67,7 @@ Prior to 3/9/2023, GPT-NeoX relied on [DeeperSpeed](https://github.com/EleutherA
   * [Weights and Biases](#weights-and-biases)
   * [TensorBoard](#tensorboard)
 - [Running on multi-node](#running-on-multi-node)
+- [Profiling](#profiling)
 - [Adoption and Publications](#adoption-and-publications)
   * [Publications](#publications)
   * [Models](#models)
@@ -76,6 +77,7 @@ Prior to 3/9/2023, GPT-NeoX relied on [DeeperSpeed](https://github.com/EleutherA
     + [Other Modalities](#other-modalities)
 - [Administrative Notes](#administrative-notes)
   * [Citing GPT-NeoX](#citing-gpt-neox)
+  * [Contributing](#contributing)
   * [Licensing](#licensing)
   * [Acknowledgements](#acknowledgements)
 
@@ -500,18 +502,21 @@ where `--eval_tasks` is a list of evaluation tasks followed by spaces, e.g `--ev
 
 # Exporting to Hugging Face
 
-GPT-NeoX is optimized heavily for training only, and GPT-NeoX model checkpoints are not compatible out of the box with other deep learning libraries. To make models easily loadable and shareable with end users, and for further exporting to various other frameworks, GPT-NeoX supports checkpoint conversion to the [Hugging Face Transformers](https://arxiv.org/abs/1910.03771) GPTNeoXModel format.
+GPT-NeoX is optimized heavily for training only, and GPT-NeoX model checkpoints are not compatible out of the box with other deep learning libraries. To make models easily loadable and shareable with end users, and for further exporting to various other frameworks, GPT-NeoX supports checkpoint conversion to the [Hugging Face Transformers](https://arxiv.org/abs/1910.03771) format.
 
-To convert a NeoX checkpoint (with pipeline-parallel-size>=1) to Hugging Face-loadable format, run:
-```bash
-python ./tools/ckpts/convert_module_to_hf.py --input_dir /path/to/model/global_stepXXX --config_file your_config.yml --output_dir hf_model/save/location
-```
+Though NeoX supports a number of different architectural configurations, including AliBi positional embeddings, not all of these configurations map cleanly onto the supported configurations within Hugging Face Transformers.
 
-To convert a sequential model to Hugging Face format, run:
+NeoX supports export of compatible models into the following architectures:
+- GPTNeoXForCausalLM
+- LlamaForCausalLM
+- MistralForCausalLM
+
+Training a model which does not fit into one of these Hugging Face Transformers architectures cleanly will require writing custom modeling code for the exported model.
+
+To convert a GPT-NeoX library checkpoint to Hugging Face-loadable format, run:
 ```bash
-python  ./tools/ckpts/convert_sequential_to_hf.py --input_dir /path/to/model/global_stepXXX --config_file your_config.yml --output_dir hf_model/save/location
+python ./tools/ckpts/convert_neox_to_hf.py --input_dir /path/to/model/global_stepXXX --config_file your_config.yml --output_dir hf_model/save/location --precision {auto,fp16,bf16,fp32} --architecture {neox,mistral,llama}
 ```
-(Note: this script should be used for v2.0 checkpoints saved on a v2.0 commit prior to https://github.com/EleutherAI/gpt-neox/pull/866 and which used `pipe-parallel-size=1`. Using `pipe-parallel-size=0` will also save models in this format.)
 
 Then to upload a model to [the Hugging Face Hub](https://huggingface.co/), run:
 ```bash
@@ -520,7 +525,27 @@ python ./tools/ckpts/upload.py
 ```
 and input the requested information, including HF hub user token.
 
-Note, however, that this compatibility is not one-to-one, and only certain configurations from GPT-NeoX are supported in the Hugging Face GPTNeoXModel class. Advanced features such as alternative positional embeddings may require new Transformers modeling code and new conversion script tweaks.
+### Importing Models Into GPT-NeoX
+
+NeoX supplies several utilities for converting a pretrained model checkpoint into a format that can be trained within the library.
+
+The following models or model families can be loaded in GPT-NeoX:
+- Llama 1
+- Llama 2
+- CodeLlama
+- Mistral-7b-v0.1
+
+We provide two utilities for converting from two different checkpoint formats into a format compatible with GPT-NeoX.
+
+To convert a Llama 1 or Llama 2 checkpoint distributed by Meta AI from its original file format (downloadable [here](https://github.com/facebookresearch/llama) or [here](https://huggingface.co/meta-llama/Llama-2-7b)) into the GPT-NeoX library, run
+
+```
+python tools/ckpts/convert_raw_llama_weights_to_neox.py --input_dir /path/to/model/parent/dir/7B --model_size 7B --output_dir /path/to/save/ckpt --num_output_shards <TENSOR_PARALLEL_SIZE> (--pipeline_parallel if pipeline-parallel-size >= 1)
+```
+
+
+To convert from a Hugging Face model into a NeoX-loadable, run `tools/ckpts/convert_hf_to_sequential.py`. See documentation within that file for further options.
+
 
 # Monitoring
 
@@ -537,6 +562,36 @@ We also support using TensorBoard via the <code><var>tensorboard-dir</var></code
 # Running on multi-node
 
 If you need to supply a hostfile for use with the MPI-based DeepSpeed launcher, you can set the environment variable `DLTS_HOSTFILE` to point to the hostfile.
+
+# Profiling
+
+We support profiling with Nsight Systems and PyTorch Memory Profiling.
+
+## Nsight Systems Profiling
+
+To use the Nsight Systems profiling, set config options `profile`, `profile_step_start`, and `profile_step_stop`. Launch training with:
+
+```
+nsys profile -s none -t nvtx,cuda -o <path/to/profiling/output> --force-overwrite true \
+--capture-range=cudaProfilerApi --capture-range-end=stop python $TRAIN_PATH/deepy.py \
+$TRAIN_PATH/train.py --conf_dir configs <config files>
+```
+
+The generated output file can then by viewed with the Nsight Systems GUI:
+
+![Alt text](images/nsight_profiling.png)
+
+## PyTorch Memory Profiling
+
+To use PyTorch Memory Profiling, set config options `memory_profiling` and `memory_profiling_path`.
+
+![Alt text](images/memory_profiling.png)
+
+View the generated profile with the [memory_viz.py](https://github.com/pytorch/pytorch/blob/main/torch/cuda/_memory_viz.py) script. Run with:
+
+```
+python _memory_viz.py trace_plot <generated_profile> -o trace.html
+```
 
 # Adoption and Publications
 
@@ -637,9 +692,14 @@ To cite the 20 billion parameter model named `GPT-NeoX-20B`, please use
 }
 ```
 
+## Contributing
+GPT-NeoX is built by the open-source AI community, and relies on our amazing contributors! Please see our
+[contributing](CONTRIBUTING.md) guide for more details on our CLA, code formatting, testing,
+etc.
+
 ## Licensing
 
-This repository hosts code that is part of EleutherAI's GPT-NeoX project. Copyright (c) 2021, EleutherAI. Licensed under the Apache License:
+This repository hosts code that is part of EleutherAI's GPT-NeoX project. Copyright (c) 2024, EleutherAI. Licensed under the Apache License:
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.

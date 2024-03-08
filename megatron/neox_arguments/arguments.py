@@ -1,4 +1,4 @@
-# Copyright (c) 2021, EleutherAI
+# Copyright (c) 2024, EleutherAI
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@ import logging
 import copy
 import torch
 import argparse
+from pkg_resources import packaging
+from importlib.metadata import version
 
 from dataclasses import dataclass
 from typing import List, Dict
@@ -510,7 +512,7 @@ class NeoXArgs(*BASE_CLASSES):
                 args_list.extend(
                     self.convert_key_value_to_command_line_arg("account", account)
                 )
-            
+
             # master_address = os.environ['SLURM_JOB_NODELIST'].split('\n')[0]
             # args_list.extend(
             #    self.convert_key_value_to_command_line_arg('master_addr', master_address)
@@ -896,7 +898,6 @@ class NeoXArgs(*BASE_CLASSES):
                 "gradient_accumulation_steps": gradient_accumulation_steps,
                 "batch_size": train_micro_batch_size_per_gpu,
                 # duplicate items
-                "gas": self.gradient_accumulation_steps,
                 "clip_grad": self.gradient_clipping,
             }
         )
@@ -1032,7 +1033,14 @@ class NeoXArgs(*BASE_CLASSES):
         # Update 'is pipe parallel' flag
         # if we set pipe_parallel_size to 0 or 1, GPT2ModelPipe.to_sequential() is called, and we run training with
         # the sequential model without the PipelineModule wrapper to avoid the overhead it incurs
-        self.update_value("is_pipe_parallel", self.pipe_parallel_size >= 1)
+        self.update_value(
+            "is_pipe_parallel", self.pipe_parallel_size > 1 and self.num_experts == 1
+        )
+        if self.num_experts > 1:
+            assert not (
+                self.is_pipe_parallel or self.pipe_parallel_size > 1
+            ), "MoE not supported with pipeline parallelism"
+            assert self.zero_optimization["stage"] != 3, "MoE not compatible with zero3"
 
         # Attention config
         if self.attention_config is None:
@@ -1057,6 +1065,32 @@ class NeoXArgs(*BASE_CLASSES):
         if self.sparsity_config is None:
             # Can't have a default value as an empty dict so need to set it here
             self.update_value("sparsity_config", {})
+
+        # Multi-query or grouped-query attention settings
+        if self.num_kv_heads is not None:
+            # need KV heads <= query heads, and KV heads dividing query heads evenly
+            assert (
+                self.num_attention_heads % self.num_kv_heads == 0
+            ), "num_kv_heads must evenly divide num_attention_heads and be no greater than it"
+
+            if self.num_kv_heads < self.num_attention_heads:
+                # GQA / MQA not compatible with sparse attention configurations
+                assert (
+                    not self.sparsity_config
+                ), "Sparse attention not compatible with GQA or MQA"
+                assert all(
+                    (attn_type == "flash") or (attn_type == "global")
+                    for attn_type in self.attention_config
+                ), "GQA / MQA currently only compatible with Flash or standard global/sliding window Attention"
+                assert (
+                    self.num_kv_heads % self.model_parallel_size == 0
+                ), "Number of KV heads must be at least model_parallel_size for now!"
+        # Flash attention version >=2.3.0 required to combine Flash + Sliding Window Attention
+        if self.sliding_window_width is not None and "flash" in self.attention_config:
+            _flash_version = packaging.version.Version(version("flash-attn"))
+            assert _flash_version >= packaging.version.Version(
+                "2.3.0"
+            ), f"Flash-Attention version ({str(_flash_version)}) must be >= 2.3.0 to support sliding window attention."
 
         # Adding equal dataset weights if none are provided
         if self.train_data_paths and (self.train_data_weights is None):

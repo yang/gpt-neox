@@ -111,7 +111,7 @@ Logging Arguments
 
 - **git_hash**: str
 
-    Default = a300979
+    Default = ae06be5
 
     current git hash of repository
 
@@ -199,6 +199,54 @@ Logging Arguments
 
 
 
+- **memory_profiling**: bool
+
+    Default = False
+
+    Whether to take a memory snapshot of the model. Useful for debugging memory issues.
+
+
+
+- **memory_profiling_path**: str
+
+    Default = None
+
+    Path to save memory snapshot to.
+
+
+
+- **profile**: bool
+
+    Default = False
+
+    Enable nsys profiling. When using this option,
+    nsys options should be specified in commandline.
+    An example nsys commandline is
+    ```
+    nsys profile -s none -t nvtx,cuda -o <path/to/output_file>
+    --force-overwrite true
+    --capture-range=cudaProfilerApi
+    --capture-range-end=stop
+    ```
+
+
+
+- **profile_step_start**: int
+
+    Default = 10
+
+    Step to start profiling at.
+
+
+
+- **profile_step_stop**: int
+
+    Default = 12
+
+    Step to stop profiling at.
+
+
+
 ## NeoXArgsModel
 
 Model Arguments
@@ -229,11 +277,37 @@ Model Arguments
 
 
 
+- **intermediate_size**: int
+
+    Default = None
+
+    Transformer intermediate size. Currently only used for "mlp_type": "llama".
+
+    If not passed, will be set to a reasonable default.
+
+
+
 - **num_attention_heads**: int
 
     Default = None
 
     Number of transformer attention heads.
+
+    If num_kv_heads is set, will control only number of query heads.
+
+
+
+- **num_kv_heads**: int
+
+    Default = None
+
+    Number of transformer key/value attention heads.
+
+    If set to None or the same value as num_attention_heads, will perform multi-head attention (MHA).
+    If set to < num_attention_heads but > 1, will perform grouped-query attention (GQA) (https://arxiv.org/pdf/2305.13245.pdf)
+    If set to 1, will perform multi-query attention.
+
+    Must be < num_attention_heads and divide num_attention_heads evenly.
 
 
 
@@ -242,6 +316,14 @@ Model Arguments
     Default = None
 
     Maximum sequence length to process.
+
+
+
+- **sliding_window_width**: int
+
+    Default = None
+
+    Width of the attention sliding window. Only supported with Flash Attention 2.
 
 
 
@@ -258,6 +340,14 @@ Model Arguments
     Default = layernorm
 
     Normalization layer to use. Choose from "layernorm", "rmsnorm", "scalenorm".
+
+
+
+- **layernorm_fusion**: bool
+
+    Default = False
+
+    Use fused layer norm kernel (if `norm` is `layernorm`).
 
 
 
@@ -508,6 +598,18 @@ Model Arguments
     Default = 10000
 
     Base for rotary positional embedding
+
+
+
+- **rotary_save_freqs_buffer**: bool
+
+    Default = False
+
+    Used to control whether the `inv_freqs` buffer in rotary embeddings
+    will be stored in checkpoints (persistent=True) or not.
+
+    Defaults to false, but is left configurable to maintain backward-compatibility
+    with GPT-NeoX checkpoints that were trained with this flag.
 
 
 
@@ -905,6 +1007,14 @@ Parallelism Arguments
 
 
 
+- **expert_interval**: int
+
+    Default = 2
+
+    Have one MoE layer every expert_interval layers
+
+
+
 ## NeoXArgsTemplate
 
 NeoXArgsTemplate()
@@ -1021,6 +1131,96 @@ Text Generation arguments
     Default = None
 
     Tasks to evaluate on using lm_eval_harness
+
+    NOTE: Requires internet connection
+
+
+
+- **moe_top_k**: int
+
+    Default = 1
+
+    Activate top K experts in MoE
+
+
+
+- **use_tutel**: bool
+
+    Default = False
+
+    Use Tutel optimizations in MoE
+
+
+
+- **num_experts**: int
+
+    Default = 1
+
+    Number of MoE experts
+
+
+
+- **moe_loss_coeff**: float
+
+    Default = 0.1
+
+    Coefficient for MoE loss
+
+
+
+- **moe_train_capacity_factor**: float
+
+    Default = 1.0
+
+    The capacity of the expert at train time
+
+
+
+- **moe_eval_capacity_factor**: float
+
+    Default = 1.0
+
+    The capacity of the expert at eval time
+
+
+
+- **moe_min_capacity**: int
+
+    Default = 4
+
+    The minimum capacity per expert regardless of the capacity_factor
+
+
+
+- **moe_token_dropping**: bool
+
+    Default = True
+
+    Whether to drop tokens when exceeding capacity
+
+
+
+- **create_moe_param_group**: bool
+
+    Default = True
+
+    Whether to create a separate parameter group for MoE parameters
+
+
+
+- **moe_use_residual**: bool
+
+    Default = True
+
+    Whether to use residual in MoE
+
+
+
+- **moe_expert_parallel_size**: int
+
+    Default = 1
+
+    Number of parallel experts in MoE
 
 
 
@@ -1465,14 +1665,6 @@ Training Arguments
     Default = False
 
     Partition Activations across GPUs before checkpointing.
-
-
-
-- **gas**: int
-
-    Default = None
-
-    gradient_accumulation_steps
 
 
 

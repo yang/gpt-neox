@@ -1,4 +1,4 @@
-# Copyright (c) 2021, EleutherAI
+# Copyright (c) 2024, EleutherAI
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -83,6 +83,11 @@ class NeoXArgsParallelism(NeoXArgsTemplate):
     according to pipeline parallel size.
     """
 
+    expert_interval: int = 2
+    """
+    Have one MoE layer every expert_interval layers
+    """
+
 
 @dataclass
 class NeoXArgsModel(NeoXArgsTemplate):
@@ -105,14 +110,39 @@ class NeoXArgsModel(NeoXArgsTemplate):
     Transformer hidden size.
     """
 
+    intermediate_size: int = None
+    """
+    Transformer intermediate size. Currently only used for "mlp_type": "llama".
+
+    If not passed, will be set to a reasonable default.
+    """
+
     num_attention_heads: int = None
     """
     Number of transformer attention heads.
+
+    If num_kv_heads is set, will control only number of query heads.
+    """
+
+    num_kv_heads: int = None
+    """
+    Number of transformer key/value attention heads.
+
+    If set to None or the same value as num_attention_heads, will perform multi-head attention (MHA).
+    If set to < num_attention_heads but > 1, will perform grouped-query attention (GQA) (https://arxiv.org/pdf/2305.13245.pdf)
+    If set to 1, will perform multi-query attention.
+
+    Must be < num_attention_heads and divide num_attention_heads evenly.
     """
 
     seq_length: int = None
     """
     Maximum sequence length to process.
+    """
+
+    sliding_window_width: int = None
+    """
+    Width of the attention sliding window. Only supported with Flash Attention 2.
     """
 
     max_position_embeddings: int = None
@@ -123,6 +153,11 @@ class NeoXArgsModel(NeoXArgsTemplate):
     norm: Literal["layernorm", "rmsnorm", "scalenorm"] = "layernorm"
     """
     Normalization layer to use. Choose from "layernorm", "rmsnorm", "scalenorm".
+    """
+
+    layernorm_fusion: bool = False
+    """
+    Use fused layer norm kernel (if `norm` is `layernorm`).
     """
 
     use_qk_layernorm: bool = False
@@ -298,6 +333,15 @@ class NeoXArgsModel(NeoXArgsTemplate):
     rotary_emb_base: int = 10000
     """
     Base for rotary positional embedding
+    """
+
+    rotary_save_freqs_buffer: bool = False
+    """
+    Used to control whether the `inv_freqs` buffer in rotary embeddings
+    will be stored in checkpoints (persistent=True) or not.
+
+    Defaults to false, but is left configurable to maintain backward-compatibility
+    with GPT-NeoX checkpoints that were trained with this flag.
     """
 
     init_method: Literal[
@@ -566,6 +610,39 @@ class NeoXArgsLogging(NeoXArgsTemplate):
     gradient_noise_scale_cpu_offload: bool = False
     """
     Whether to offload the buffered gradients to cpu when measuring gradient noise scale.
+    """
+
+    memory_profiling: bool = False
+    """
+    Whether to take a memory snapshot of the model. Useful for debugging memory issues.
+    """
+
+    memory_profiling_path: str = None
+    """
+    Path to save memory snapshot to.
+    """
+
+    profile: bool = False
+    """
+    Enable nsys profiling. When using this option,
+    nsys options should be specified in commandline.
+    An example nsys commandline is
+    ```
+    nsys profile -s none -t nvtx,cuda -o <path/to/output_file>
+    --force-overwrite true
+    --capture-range=cudaProfilerApi
+    --capture-range-end=stop
+    ```
+    """
+
+    profile_step_start: int = 10
+    """
+    Step to start profiling at.
+    """
+
+    profile_step_stop: int = 12
+    """
+    Step to stop profiling at.
     """
 
 
@@ -991,9 +1068,6 @@ class NeoXArgsTraining(NeoXArgsTemplate):
     Partition Activations across GPUs before checkpointing.
     """
 
-    gas: int = None
-    """gradient_accumulation_steps"""  # TODO this is a duplicate, remove?
-
     clip_grad: float = 1.0
     """
     Gradient clipping based on global L2 norm.
@@ -1153,4 +1227,61 @@ class NeoXArgsTextgen(NeoXArgsTemplate):
     eval_tasks: list = None
     """
     Tasks to evaluate on using lm_eval_harness
+
+    NOTE: Requires internet connection
+    """
+
+    moe_top_k: int = 1
+    """
+    Activate top K experts in MoE
+    """
+
+    use_tutel: bool = False
+    """
+    Use Tutel optimizations in MoE
+    """
+
+    num_experts: int = 1
+    """
+    Number of MoE experts
+    """
+
+    moe_loss_coeff: float = 0.1
+    """
+    Coefficient for MoE loss
+    """
+
+    moe_train_capacity_factor: float = 1.0
+    """
+    The capacity of the expert at train time
+    """
+
+    moe_eval_capacity_factor: float = 1.0
+    """
+    The capacity of the expert at eval time
+    """
+
+    moe_min_capacity: int = 4
+    """
+    The minimum capacity per expert regardless of the capacity_factor
+    """
+
+    moe_token_dropping: bool = True
+    """
+    Whether to drop tokens when exceeding capacity
+    """
+
+    create_moe_param_group: bool = True
+    """
+    Whether to create a separate parameter group for MoE parameters
+    """
+
+    moe_use_residual: bool = True
+    """
+    Whether to use residual in MoE
+    """
+
+    moe_expert_parallel_size: int = 1
+    """
+    Number of parallel experts in MoE
     """
