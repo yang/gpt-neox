@@ -112,6 +112,11 @@ class NeoXArgsMoE(NeoXArgsTemplate):
     not used if set to None
     """
 
+    enable_expert_tensor_parallelism: bool = False
+    """
+    Enable expert tensor parallelism
+    """
+
 
 @dataclass
 class NeoXArgsModel(NeoXArgsTemplate):
