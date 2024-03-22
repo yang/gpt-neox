@@ -1,4 +1,4 @@
-import torch.cuda
+import torch, torch.cuda
 
 
 class Metric:
@@ -49,3 +49,27 @@ def monitor_method_cuda_wall_times(metric, obj, methodname):
             metric.report()
 
     setattr(obj, methodname, newmeth)
+
+
+import pprint
+
+
+def safeprint(*args):
+    import fcntl
+
+    with open("/dev/null", "w") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        rank = torch.distributed.get_rank()
+        print(
+            f"!! {rank=}",
+            *[a if type(a) is str else pprint.pformat(a, width=200) for a in args],
+        )
+
+
+def safeprint0(*args):
+    rank = torch.distributed.get_rank()
+    if rank == 0:
+        print(
+            f"!!",
+            *[a if type(a) is str else pprint.pformat(a, width=200) for a in args],
+        )

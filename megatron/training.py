@@ -21,6 +21,7 @@
 """Pretrain utilities."""
 from datetime import datetime
 from functools import partial
+from megatron.devutil import safeprint, safeprint0
 
 import math
 import sys
@@ -439,6 +440,16 @@ def forward_step(
     if neox_args.memory_profiling:
         torch.cuda.nvtx.range_push(f"Forward pass")
     # Sequential returns moe_losses, but this is not yet supported by pipe parallel
+
+    def summary(tensor):
+        return f"T[{','.join(str(s) for s in tensor.shape)}]({', '.join(f'{x:.4g}' for x in tensor.flatten()[:2].tolist())})"
+
+    if neox_args.dummy:
+        # must be >=2 tokens to meet moe_min_capacity=2
+        tokens = torch.tensor([[2], [3]], device=tokens.device, dtype=torch.long)
+        safeprint("model", {k: summary(v.data) for k, v in model.named_parameters()})
+    else:
+        safeprint("model", {k: summary(v.data) for k, v in model.named_parameters()})
     maybe_tuple = model((tokens, position_ids, attention_mask), neox_args=neox_args)
     if type(maybe_tuple) is tuple:
         outputs, moe_losses = maybe_tuple
@@ -453,7 +464,7 @@ def forward_step(
         loss_mask = loss_mask[:, : neox_args.curriculum_seqlen].contiguous()
         labels = labels[:, : neox_args.curriculum_seqlen].contiguous()
     main_loss = cross_entropy(
-        outputs, (labels, loss_mask), _fp16=neox_args.fp16_lm_cross_entropy
+        neox_args, outputs, (labels, loss_mask), _fp16=neox_args.fp16_lm_cross_entropy
     )
     if neox_args.moe_num_experts > 1:
         if neox_args.moe_type == "deepspeed":
@@ -786,6 +797,24 @@ def setup_model_and_optimizer(neox_args, use_cache=False, iteration=None):
             model.module.set_batch_fn(
                 partial(get_batch_sequential, neox_args=neox_args)
             )
+
+        import torch.distributed
+        from deepspeed.utils import groups
+
+        safeprint(
+            "expert groups",
+            [
+                torch.distributed.get_process_group_ranks(g)
+                for g in groups._EXPERT_PARALLEL_GROUP.values()
+            ],
+        )
+        safeprint(
+            "expert data groups",
+            [
+                torch.distributed.get_process_group_ranks(g)
+                for g in groups._EXPERT_DATA_PARALLEL_GROUP.values()
+            ],
+        )
 
     else:
         raise ValueError("Must be using deepspeed to run neox")

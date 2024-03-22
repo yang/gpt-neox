@@ -20,6 +20,7 @@
 import math
 import torch
 import torch.nn as nn
+from deepspeed.moe.layer import MoE
 from collections import defaultdict
 
 from functools import partial
@@ -56,7 +57,54 @@ def gpt2_attention_mask_func(attention_scores, ltor_mask):
     return attention_scores
 
 
-def cross_entropy(output, labels, _fp16=False):
+class DummyMlp(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.linear = nn.Linear(args.hidden_size, args.hidden_size, bias=False)
+        drank = mpu.get_data_parallel_rank()
+        trank = mpu.get_model_parallel_rank()
+        prank = mpu.get_pipe_parallel_rank()
+        rank = drank
+        ranks = torch.tensor([drank, trank, prank], dtype=torch.float32)
+        # must be same init for router weights to remain the same?
+        # self.linear.weight.data[: args.hidden_size] = ranks[: args.hidden_size]
+        # self.linear.weight.data
+
+    def forward(self, x):
+        # safeprint("!!DummyMlp.forward", self.linear.weight.data)
+        return self.linear(x)
+        return self.linear(
+            x[0].flatten()[0].reshape(1, 1).to(self.linear.weight.data.dtype)
+        )
+
+
+class DummyExMlp(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.args = args
+        if args.moe_num_experts > 1:
+            self.mlp = MoE(
+                args.hidden_size,
+                DummyMlp(args),
+                num_experts=args.moe_num_experts,
+                ep_size=args.moe_expert_parallel_size,
+                k=args.moe_top_k,
+                use_residual=args.moe_use_residual,
+                capacity_factor=args.moe_train_capacity_factor,
+                eval_capacity_factor=args.moe_eval_capacity_factor,
+                min_capacity=args.moe_min_capacity,
+                drop_tokens=args.moe_token_dropping,
+                use_tutel=args.use_tutel,
+                enable_expert_tensor_parallelism=args.enable_expert_tensor_parallelism,
+            )
+        else:
+            self.mlp = DummyMlp(args)
+
+    def forward(self, x):
+        return self.mlp(x[0].repeat(1, 1, self.args.hidden_size).to(torch.float32))[0]
+
+
+def cross_entropy(args, output, labels, _fp16=False):
     """From pretrain_gpt2:forward_step()"""
     """
     if self.fp16_lm_cross_entropy:
@@ -66,6 +114,9 @@ def cross_entropy(output, labels, _fp16=False):
         loss = mpu.vocab_parallel_cross_entropy(output.float(), labels)
         return loss
     """
+    if args.dummy:
+        loss = output.sum()
+        return loss
     labels, loss_mask = labels[0], labels[1]
     if _fp16:
         assert output.dtype == torch.half and loss_mask.dtype == torch.half
@@ -129,7 +180,14 @@ class GPT2ModelPipe(PipelineModule, torch.nn.Module):
 
         super().__init__(
             layers=self.specs,
-            loss_fn=partial(cross_entropy, _fp16=self.neox_args.fp16_lm_cross_entropy),
+            loss_fn=lambda output, labels: (
+                cross_entropy(
+                    neox_args,
+                    output,
+                    labels,
+                    _fp16=self.neox_args.fp16_lm_cross_entropy,
+                )
+            ),
             topology=topology,
             activation_checkpoint_interval=self.neox_args.checkpoint_num_layers
             if self.neox_args.checkpoint_activations
@@ -179,6 +237,14 @@ class GPT2ModelPipe(PipelineModule, torch.nn.Module):
         )
 
     def init_specs(self):
+        if self.neox_args.dummy:
+            self.specs.append(
+                LayerSpec(
+                    DummyExMlp,
+                    self.neox_args,
+                )
+            )
+            return
 
         weight_tying = not self.neox_args.no_weight_tying
         self.specs = []

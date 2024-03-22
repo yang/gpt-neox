@@ -1275,6 +1275,11 @@ class NeoXArgsTextgen(NeoXArgsTemplate):
     Use Tutel optimizations in MoE
     """
 
+    dummy: bool = False
+    """
+    Dummy flag for testing
+    """
+
     moe_num_experts: int = 1
     """
     Number of MoE experts
