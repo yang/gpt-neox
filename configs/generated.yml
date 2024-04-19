@@ -1,0 +1,70 @@
+attention_dropout: 0.0
+bias_gelu_fusion: false
+checkpoint_activations: true
+checkpoint_factor: 10000
+checkpoint_num_layers: 1
+data_impl: mmap
+distributed_backend: nccl
+dummy: false
+enable_expert_tensor_parallelism: true
+eval_interval: 1000
+eval_iters: 10
+fp16:
+  enabled: false
+  hysteresis: 2
+  loss_scale: 0
+  loss_scale_window: 1000
+  min_loss_scale: 1
+gpt_j_residual: false
+gradient_clipping: 1.0
+hidden_dropout: 0.0
+hidden_size: 2
+hostfile: /mock_path
+init_method: small_init
+keep_last_n_checkpoints: 4
+layernorm_fusion: false
+log_interval: 1
+lr_decay_iters: 320000
+lr_decay_style: cosine
+max_position_embeddings: 2048
+min_lr: 6.0e-05
+model_parallel_size: 2
+moe_expert_parallel_size: 1
+moe_min_capacity: 2
+moe_num_experts: 2
+moe_type: deepspeed
+no_weight_tying: true
+norm: layernorm
+num_attention_heads: 2
+num_layers: 1
+optimizer:
+  params:
+    betas:
+    - 0.9
+    - 0.95
+    eps: 1.0e-08
+    lr: 0.0006
+  type: Adam
+output_layer_init_method: wang_init
+output_layer_parallelism: column
+partition_activations: true
+pipe_parallel_size: 1
+pos_emb: rotary
+rope_fusion: false
+scaled_upper_triang_masked_softmax_fusion: false
+seq_length: 2
+steps_per_print: 1
+synchronize_each_layer: true
+train_iters: 256
+train_micro_batch_size_per_gpu: 1
+wall_clock_breakdown: true
+warmup: 0.01
+weight_decay: 0.1
+zero_optimization:
+  allgather_bucket_size: 500000000
+  allgather_partitions: true
+  contiguous_gradients: true
+  overlap_comm: true
+  reduce_bucket_size: 500000000
+  reduce_scatter: true
+  stage: 0

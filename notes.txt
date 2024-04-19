@@ -1,0 +1,19 @@
+- normally, TP ranks init differently
+
+- when ne=2 ep=2, just one expert per node (only experts.0 exists), inits differently.
+
+- when ne=2 etp=2, each node handles half of each expert, so experts.[01] exist. the halves init differently (diff nodes), but diff experts init the same (within each node)! a little fishy, but i guess fine?
+
+  - they do diverge
+
+- when ne=2 ep=2 etp=2, each node handles half of one expert, so only experts.0 exists. inits the same for same EP group / diff EP ranks, but differently in ETP group / diff ETP ranks.
+
+  - they do diverge
+
+open questions:
+
+- how to be confident router for the same EP group will have the same params / be diff across ranks?
+
+- why do these remain the same always for mb?
+
+- what's the right init?
